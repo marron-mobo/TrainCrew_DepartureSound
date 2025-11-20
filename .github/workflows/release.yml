@@ -1,0 +1,69 @@
+name: Build, Test and Release
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # タグ取得のため浅いクローンを禁止
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x' # プロジェクトに合わせて変更
+
+      # ======= テスト =======
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run tests
+        run: dotnet test --configuration Release --no-build
+
+      # ======= 最新タグから次のタグ生成 =======
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Calculate next tag
+        id: next_tag
+        run: |
+          ver="${{ steps.get_tag.outputs.latest_tag }}"
+          ver="${ver#v}"   # 先頭の v を除去
+
+          IFS='.' read -r major minor patch <<< "$ver"
+          patch=$((patch + 1))
+
+          next="v${major}.${minor}.${patch}"
+          echo "tag=$next" >> $GITHUB_OUTPUT
+
+      # ======= Build =======
+      - name: Build project
+        run: dotnet publish -c Release -o output
+
+      # ======= Release 作成 =======
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.next_tag.outputs.tag }}
+          name: "Release ${{ steps.next_tag.outputs.tag }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ======= 出力ファイルをアップロード =======
+      - name: Upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.next_tag.outputs.tag }}
+          files: output/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
