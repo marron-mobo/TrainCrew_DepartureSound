@@ -48,8 +48,15 @@ jobs:
           echo "tag=$next" >> $GITHUB_OUTPUT
 
       # ======= Build =======
+      - name: Install MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Build project
-        run: dotnet publish -c Release -o output
+        run: msbuild "車掌用知らせ灯.csproj" /p:Configuration=Release /p:Platform="Any CPU"
+
+      - name: Publish project
+        run: msbuild "車掌用知らせ灯.csproj" /p:Configuration=Release /p:PublishSingleFile=false /p:OutDir=output\
+
 
       # ======= Release 作成 =======
       - name: Create Release
