@@ -17,7 +17,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x' # プロジェクトに合わせて変更
+          dotnet-version: '8.0.x'
 
       # ======= テスト =======
       - name: Restore dependencies
@@ -26,15 +26,17 @@ jobs:
       - name: Run tests
         run: dotnet test --configuration Release --no-build
 
-      # ======= 最新タグから次のタグ生成 =======
+      # ======= 最新タグ取得（bash使用） =======
       - name: Get latest tag
         id: get_tag
+        shell: bash
         run: |
           tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "latest_tag=$tag" >> $GITHUB_OUTPUT
 
       - name: Calculate next tag
         id: next_tag
+        shell: bash
         run: |
           ver="${{ steps.get_tag.outputs.latest_tag }}"
           ver="${ver#v}"   # 先頭の v を除去
