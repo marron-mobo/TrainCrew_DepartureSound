@@ -1,9 +1,10 @@
 ﻿using System;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
-using WMPLib;
 using TrainCrew;
+using WMPLib;
 
 namespace 車掌用知らせ灯
 {
@@ -15,6 +16,7 @@ namespace 車掌用知らせ灯
         private int IsPlayed = 0; // 発車放送が再生されたか
         private int IsStopped = 0; // 停止状態のフラグ
         private string sound; // 音声ファイルのパス
+        private int waitSeconds = 3; // 待機秒数
 
         public Form1()
         {
@@ -58,7 +60,7 @@ namespace 車掌用知らせ灯
         }
 
         // 発車放送再生の処理
-        private void CircleDraw(object sender, EventArgs e)
+        private async void CircleDraw(object sender, EventArgs e)
         {
             var state = TrainCrewInput.GetTrainState();
 
@@ -68,14 +70,16 @@ namespace 車掌用知らせ灯
                 {
                     URL = sound
                 };
-                player.controls.play();
                 IsPlayed = 1;
+                await Task.Delay(waitSeconds * 1000);
+                player.controls.play();
             }
             else if (!state.AllClose)
             {
                 IsPlayed = 0; // 戸閉が解除されたらリセット
             }
         }
+
 
         // 音声ファイルの存在確認
         private void IsAudioFileAvail()
