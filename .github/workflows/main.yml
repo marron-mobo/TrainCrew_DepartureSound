@@ -1,78 +1,134 @@
-name: Build, Test and Release
-
+name: Build & Release
 on:
-  push:
-    branches: [ master ]
+  push: { }
+
+env:
+  APP_NAME: "DepartureSound"
+  NAMESPACE: "DepartureSound"
+  TZ: "Asia/Tokyo"
 
 jobs:
-  build:
-    runs-on: windows-latest
-
+  calc_version:
+    runs-on: ubuntu-latest
+    name: "Calc Version"
+    outputs:
+      VERSION: ${{ steps.calc_version.outputs.VERSION }}
+      APP_PREFIX: ${{ steps.calc_version.outputs.APP_PREFIX }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Get latest release
+        id: latest_release
+        uses: actions/github-script@v7.0.1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         with:
-          fetch-depth: 0   # タグ取得のため浅いクローンを禁止
+          script: |
+            try {
+              const response = await github.rest.repos.getLatestRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
+              return response.data.tag_name;
+            }
+            catch (e){
+              if (e.status === 404) {
+                return '';
+              } else {
+                throw e;
+              }
+            }
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - name: Calculate Version
+        id: calc_version
+        run: |
+          latest_tag="${{ steps.latest_release.outputs.result }}"
+          if [ -n "${latest_tag}" ]; then
+            today=$(date +%Y%m%d)
+            if [[ $latest_tag == *$today* ]]; then
+              n=$(echo $latest_tag | awk -F. '{print $4}')
+              n=$((n + 1))
+            else
+              n=1
+            fi
+            VERSION="v1.0.${today}.${n}-beta"
+          else
+            VERSION=$(date +%Y%m%d%H%M%S)
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          file_name_version=$(echo "$VERSION" | sed 's/\./_/g')
+          echo "APP_PREFIX=${{ env.APP_NAME }}_${file_name_version}" >> "$GITHUB_OUTPUT"
+
+  build:
+    runs-on: ubuntu-latest
+    needs: calc_version
+    name: "Build"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Generate ServerAddress.cs
+        run: |
+          cat <<EOF > ./ServerAddress.cs
+          namespace ${{ env.NAMESPACE }};
+          public static class ServerAddress {
+              public const string SignalAddress = "${{ secrets.SERVER_ADDRESS }}";
+              public const string Version = "${{ needs.calc_version.outputs.VERSION }}";
+          }
+          EOF
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@v4.3.1
         with:
           dotnet-version: '8.0.x'
 
-      # ======= テスト =======
-      - name: Restore dependencies
-        run: dotnet restore
-
-      - name: Run tests
-        run: dotnet test --configuration Release --no-build
-
-      # ======= 最新タグ取得（bash使用） =======
-      - name: Get latest tag
-        id: get_tag
-        shell: bash
+      - name: Create global.json
         run: |
-          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+          cat <<EOF > ./global.json
+          {
+            "sdk": {
+              "version": "8.0.0",
+              "rollForward": "latestFeature"
+            }
+          }
+          EOF
 
-      - name: Calculate next tag
-        id: next_tag
-        shell: bash
+      - name: Build EXE
         run: |
-          ver="${{ steps.get_tag.outputs.latest_tag }}"
-          ver="${ver#v}"   # 先頭の v を除去
+          dotnet publish -c Release \
+            -o ./out \
+            -r win-x64 \
+            -p:PublishSingleFile=true \
+            -p:EnableWindowsTargeting=true \
+            --self-contained false
 
-          IFS='.' read -r major minor patch <<< "$ver"
-          patch=$((patch + 1))
+      - name: Zip output
+        run: |
+          cd out
+          zip -r "../${{ needs.calc_version.outputs.APP_PREFIX }}.zip" .
 
-          next="v${major}.${minor}.${patch}"
-          echo "tag=$next" >> $GITHUB_OUTPUT
+      - name: Upload ZIP (artifact)
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ${{ needs.calc_version.outputs.APP_PREFIX }}.zip
+          path: ./${{ needs.calc_version.outputs.APP_PREFIX }}.zip
 
-      # ======= Build =======
-      - name: Install MSBuild
-        uses: microsoft/setup-msbuild@v2
+  release:
+    runs-on: ubuntu-latest
+    name: "Create Release"
+    needs:
+      - calc_version
+      - build
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4.2.1
+        with:
+          path: out
 
-      - name: Build project
-        run: msbuild "車掌用知らせ灯.csproj" /p:Configuration=Release /p:Platform="Any CPU"
-
-      - name: Publish project
-        run: msbuild "車掌用知らせ灯.csproj" /p:Configuration=Release /p:PublishSingleFile=false /p:OutDir=output\
-
-
-      # ======= Release 作成 =======
       - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: ${{ steps.next_tag.outputs.tag }}
-          name: "Release ${{ steps.next_tag.outputs.tag }}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # ======= 出力ファイルをアップロード =======
-      - name: Upload artifacts
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.next_tag.outputs.tag }}
-          files: output/**
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ needs.calc_version.outputs.VERSION }}
+          files: out/*.zip
+          make_latest: ${{ github.ref == 'refs/heads/master' }}
+          prerelease: ${{ github.ref != 'refs/heads/master' }}
