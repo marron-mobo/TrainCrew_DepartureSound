@@ -58,52 +58,39 @@ jobs:
           echo "APP_PREFIX=${{ env.APP_NAME }}_${file_name_version}" >> "$GITHUB_OUTPUT"
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest   # ← ★ ここが重要（Windows でビルド）
     needs: calc_version
     name: "Build"
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
       - name: Generate ServerAddress.cs
         run: |
-          cat <<EOF > ./ServerAddress.cs
+          $content = @"
           namespace ${{ env.NAMESPACE }};
           public static class ServerAddress {
               public const string SignalAddress = "${{ secrets.SERVER_ADDRESS }}";
               public const string Version = "${{ needs.calc_version.outputs.VERSION }}";
           }
-          EOF
+          "@
+          $content | Out-File -FilePath "./ServerAddress.cs" -Encoding utf8
 
-      - name: Setup dotnet
-        uses: actions/setup-dotnet@v4.3.1
-        with:
-          dotnet-version: '8.0.x'
+      - name: Restore NuGet packages
+        run: nuget restore "車掌用知らせ灯.sln"
 
-      - name: Create global.json
-        run: |
-          cat <<EOF > ./global.json
-          {
-            "sdk": {
-              "version": "8.0.0",
-              "rollForward": "latestFeature"
-            }
-          }
-          EOF
-
-      - name: Build EXE
-        run: |
-          dotnet publish -c Release \
-            -o ./out \
-            -r win-x64 \
-            -p:PublishSingleFile=true \
-            -p:EnableWindowsTargeting=true \
-            --self-contained false
+      - name: Build with MSBuild
+        run: msbuild "車掌用知らせ灯.sln" /p:Configuration=Release /p:Platform="Any CPU"
 
       - name: Zip output
         run: |
-          cd out
-          zip -r "../${{ needs.calc_version.outputs.APP_PREFIX }}.zip" .
+          powershell Compress-Archive -Path "./bin/Release/*" -DestinationPath "${{ needs.calc_version.outputs.APP_PREFIX }}.zip"
 
       - name: Upload ZIP (artifact)
         uses: actions/upload-artifact@v4.6.2
