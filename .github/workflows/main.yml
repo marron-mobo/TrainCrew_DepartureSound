@@ -15,7 +15,6 @@ env:
 
 jobs:
   calc_version:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     name: "Calc Version"
     outputs:
@@ -63,7 +62,6 @@ jobs:
           echo "APP_PREFIX=${{ env.APP_NAME }}_${file_name_version}" >> "$GITHUB_OUTPUT"
 
   build:
-    if: github.event.pull_request.merged == true
     runs-on: windows-latest
     needs: calc_version
     name: "Build"
@@ -109,7 +107,6 @@ jobs:
           path: ./${{ needs.calc_version.outputs.APP_PREFIX }}.zip
 
   release:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     name: "Create Release"
     needs:
